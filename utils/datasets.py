@@ -3,7 +3,7 @@ import random
 import os
 import sys
 import numpy as np
-from PIL import Image
+from PIL import Image,ImageDraw
 import torch
 import torch.nn.functional as F
 
@@ -64,7 +64,7 @@ class ListDataset(Dataset):
             self.img_files = file.readlines()
 
         self.label_files = [
-            path.replace("images", "labels").replace(".png", ".txt").replace(".jpg", ".txt")
+            path.replace("JPEGImages", "labels").replace(".png", ".txt").replace(".jpg", ".txt")
             for path in self.img_files
         ]
         self.img_size = img_size
@@ -84,7 +84,10 @@ class ListDataset(Dataset):
         img_path = self.img_files[index % len(self.img_files)].rstrip()
 
         img = Image.open(img_path).convert('RGB')
+        # img = Image.open(img_path).resize(self.img_size,self.img_size)
+        # img=img.convert('RGB')
         img = np.array(img)
+        img = np.array(Image.fromarray(img).resize((self.img_size, self.img_size)))
 
         # Handle images with less than three channels
         if len(img.shape) != 3:
@@ -92,10 +95,11 @@ class ListDataset(Dataset):
             img = img.repeat(3, 0)
 
         h, w, _ = img.shape  # np格式的img是H*W*C
-        h_factor, w_factor = (h, w) if self.normalized_labels else (1, 1)
+        # h_factor, w_factor = (h, w) if self.normalized_labels else (1, 1)
         # Pad to square resolution
-        img, pad = pad_to_square(img, 0)
-        padded_h, padded_w, _ = img.shape
+        #img=resize(img,self.img_size)
+        # img, pad = pad_to_square(img, 0)
+        # padded_h, padded_w, _ = img.shape
 
         # ---------
         #  Label
@@ -105,21 +109,22 @@ class ListDataset(Dataset):
 
         assert os.path.exists(label_path)   # 确保label_path必定存在，即图片必定存在label
         boxes = np.loadtxt(label_path).reshape(-1, 5)
-        # Extract coordinates for unpadded + unscaled image
-        x1 = w_factor * (boxes[:, 1] - boxes[:, 3] / 2)
-        y1 = h_factor * (boxes[:, 2] - boxes[:, 4] / 2)
-        x2 = w_factor * (boxes[:, 1] + boxes[:, 3] / 2)
-        y2 = h_factor * (boxes[:, 2] + boxes[:, 4] / 2)
-        # Adjust for added padding
-        x1 += pad[0]    # pad是从低维到高维的，感觉这样写是有问题的，应该只与pad[0][2]有关，不过一般都是相等的
-        y1 += pad[2]
-        x2 += pad[0]
-        y2 += pad[2]
+        # # Extract coordinates for unpadded + unscaled image
+        x1 = self.img_size/w * (boxes[:, 1] - boxes[:, 3] / 2)
+        y1 = self.img_size/h * (boxes[:, 2] - boxes[:, 4] / 2)
+        x2 = self.img_size/w * (boxes[:, 1] + boxes[:, 3] / 2)
+        y2 = self.img_size/h * (boxes[:, 2] + boxes[:, 4] / 2)
+
+        # # Adjust for added padding
+        # x1 += pad[0]    # pad是从低维到高维的，感觉这样写是有问题的，应该只与pad[0][2]有关，不过一般都是相等的
+        # y1 += pad[2]
+        # x2 += pad[0]
+        # y2 += pad[2]
         # Returns (x, y, w, h)
-        boxes[:, 1] = ((x1 + x2) / 2) / padded_w
-        boxes[:, 2] = ((y1 + y2) / 2) / padded_h
-        boxes[:, 3] *= w_factor / padded_w      # 原来的数值是boxw_ori/imgw_ori, 现在变成了(boxw_ori/imgw_ori)*imgw_ori/imgw_pad=boxw_ori/imgw_pad
-        boxes[:, 4] *= h_factor / padded_h
+        boxes[:, 1] = (x1 + x2) / 2 
+        boxes[:, 2] = (y1 + y2) / 2
+        boxes[:, 3] = x2-x1      # 原来的数值是boxw_ori/imgw_ori, 现在变成了(boxw_ori/imgw_ori)*imgw_ori/imgw_pad=boxw_ori/imgw_pad
+        boxes[:, 4] = y2-y1
 
         # Apply augmentations
         # img, 以最长边为标准进行padding得到的uint8图像
@@ -170,3 +175,4 @@ class ListDataset(Dataset):
             images = F.interpolate(images, size=self.img_size, mode="nearest")
 
         return images
+
